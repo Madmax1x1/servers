@@ -13,7 +13,7 @@ out; everything else points here.
 | --- | --- | --- | --- |
 | Inner loop | `npm run validate -w src/<server>`, `npm run validate:py -- <server>` | Your machine | While iterating on one server |
 | Pre-push gate | `npm run local:gate` | Your machine, under a lease | Before every push |
-| CI | `.github/workflows/typescript.yml`, `python.yml` | GitHub, on every push and pull request | Before merge |
+| CI | `.github/workflows/typescript.yml`, `python.yml`, `everything-mcp-diff.yml` | GitHub, on every push and pull request (`everything-mcp-diff.yml`: when `everything` or what builds it changes) | Before merge |
 
 **`npm run local:gate` runs every check CI runs.** CI splits the same checks
 into parallel jobs on a fresh install; the gate runs them in sequence on your
@@ -39,6 +39,7 @@ in this order, and the first failure stops the run.
 | 4 | `validate:py` | Per Python server: `uv sync --locked`, `ruff check`, `ruff format --check`, `pyright`, `pytest`, `uv build` | `python.yml` → **Test \<server\>** (one leg each) |
 | 5 | `verify:skills:cli` | `claude plugin validate` on `.claude/skills`, at the pinned CLI version | `typescript.yml` → **Root guards** |
 | 6 | `smoke` | Every server boots over each transport it implements and answers one tool call | `typescript.yml` → **Boot smoke** |
+| 7 | `interface-diff` | The `everything` server's MCP interface (capabilities, tools, prompts, resources, resource templates) in this checkout's build, diffed against the same server built from the base. It fails only when the diff cannot run; a changed interface is reported, not failed | `everything-mcp-diff.yml` → **Diff Everything Server Interface** (and the PR comment) |
 
 Notes on the stages:
 
@@ -55,8 +56,9 @@ Notes on the stages:
   not the one installed: it fetches it with `npx`. `validate:py` needs it too
   when a server's environment is missing or behind its lockfile, since
   `uv sync --locked` then downloads packages (and the pinned interpreter, if
-  `uv` does not have it). With warm caches those are the only two stages that
-  can fail offline.
+  `uv` does not have it), and so does `interface-diff` for the base's
+  `npm ci`. With warm caches those are the only three stages that can fail
+  offline.
 - **`smoke` launches what a user launches**: the built `dist/index.js` for a
   TypeScript server, the console script through `uv run --no-sync` for a Python
   one. stdio for all seven; HTTP+SSE and Streamable HTTP as well for
@@ -66,6 +68,16 @@ Notes on the stages:
   than the default 3001. It runs after `validate` and `validate:py` because it
   needs the build and each Python server's synced environment; it creates
   neither.
+- **`interface-diff` compares against the merge-base with `origin/v2/main`**
+  locally (`-- --base <ref>` names another), and against the PR's base, the
+  commit before the push, or the previous release's tag in CI. It builds the
+  base from an export of that commit under `node_modules/.cache/` and removes
+  it afterwards; the head is the build `validate` made. It drives the
+  `mcp-server-diff` CLI, an exact-pinned root devDependency, which probes with
+  the 2026-07-28 `server/discover` first and falls back to the `initialize`
+  handshake, so it covers a server in either era. Its `npm ci` of the base
+  needs the network when the npm cache is cold, and it needs
+  `origin/v2/main` fetched. Only `everything` is diffed today (#4860).
 - `python.yml` also has a **Build \<server\>** job per server that re-runs
   pyright and `uv build` and uploads the built distribution. It checks nothing
   stage 4 does not.
