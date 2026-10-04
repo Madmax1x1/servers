@@ -387,6 +387,7 @@ describe("the gate's name", () => {
     "validate:py",
     "verify:skills:cli",
     "smoke",
+    "interface-diff",
   ]) {
     it(`runs \`${stage}\``, () => {
       assert.ok(
